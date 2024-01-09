@@ -19,7 +19,7 @@ static uint16_t dmxMax = 16; /* Default to sending the first 16 channels */
 static uint8_t dmxStarted = 0;
 static uint16_t dmxState = 0;
 
-#if defined(ARDUINO_TEENSY40) || defined(ARDUINO_TEENSY41) || defined(ARDUINO_TEENSY_MICROMOD) 
+#if defined(ARDUINO_TEENSY40) || defined(ARDUINO_TEENSY41) || defined(ARDUINO_TEENSY_MICROMOD)
 // Teensy 4.X has 32-bit ports
 static volatile uint32_t *dmxPort;
 #else
@@ -35,7 +35,17 @@ void dmxSendByte(volatile uint8_t);
 void dmxWrite(int,uint8_t);
 void dmxMaxChannel(int);
 
-/elif defined(__AVR_ATmega8__)
+/* TIMER2 has a different register mapping on the ATmega8.
+ * The modern chips (168, 328P, 1280) use identical mappings.
+ */
+#if defined(__AVR_ATmega168__) || defined(__AVR_ATmega168P__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_AT90USB646__) || defined(__AVR_AT90USB1286__)
+#define TIMER2_INTERRUPT_ENABLE() TIMSK2 |= _BV(TOIE2)
+#define TIMER2_INTERRUPT_DISABLE() TIMSK2 &= ~_BV(TOIE2)
+#define ISR_NAME TIMER2_OVF_vect
+#define BITS_PER_TIMER_TICK (F_CPU / 31372)
+
+// older ATMEGA8 has slighly different timer2
+#elif defined(__AVR_ATmega8__)
 #define TIMER2_INTERRUPT_ENABLE() TIMSK |= _BV(TOIE2)
 #define TIMER2_INTERRUPT_DISABLE() TIMSK &= ~_BV(TOIE2)
 #define ISR_NAME TIMER2_OVF_vect
@@ -197,39 +207,39 @@ void dmxSendByte(uint8_t value)
  */
 ISR(ISR_NAME,ISR_NOBLOCK) {
 
-    // Prevent this interrupt running recursively
-    TIMER2_INTERRUPT_DISABLE();
+// Prevent this interrupt running recursively
+TIMER2_INTERRUPT_DISABLE();
 
-    uint16_t bitsLeft = BITS_PER_TIMER_TICK; // DMX Bit periods per timer tick
-    bitsLeft >>=2; // 25% CPU usage
-    while (1) {
-        if (dmxState == 0) {
-            // Next thing to send is reset pulse and start code
-            // which takes 35 bit periods
-            uint8_t i;
-            if (bitsLeft < 35) break;
-            bitsLeft-=35;
-            *dmxPort &= ~dmxBit;
-            for (i=0; i<11; i++) delayMicroseconds(8);
-            *dmxPort |= dmxBit;
-            delayMicroseconds(12);
-            dmxSendByte(0);
-        } else {
-            // Now send a channel which takes 11 bit periods
-            if (bitsLeft < 11) break;
-            bitsLeft-=11;
-            dmxSendByte(dmxBuffer[dmxState-1]);
-        }
-        // Successfully completed that stage - move state machine forward
-        dmxState++;
-        if (dmxState > dmxMax) {
-            dmxState = 0; // Send next frame
-            break;
-        }
-    }
+uint16_t bitsLeft = BITS_PER_TIMER_TICK; // DMX Bit periods per timer tick
+bitsLeft >>=2; // 25% CPU usage
+while (1) {
+if (dmxState == 0) {
+// Next thing to send is reset pulse and start code
+// which takes 35 bit periods
+uint8_t i;
+if (bitsLeft < 35) break;
+bitsLeft-=35;
+*dmxPort &= ~dmxBit;
+for (i=0; i<11; i++) delayMicroseconds(8);
+*dmxPort |= dmxBit;
+delayMicroseconds(12);
+dmxSendByte(0);
+} else {
+// Now send a channel which takes 11 bit periods
+if (bitsLeft < 11) break;
+bitsLeft-=11;
+dmxSendByte(dmxBuffer[dmxState-1]);
+}
+// Successfully completed that stage - move state machine forward
+dmxState++;
+if (dmxState > dmxMax) {
+dmxState = 0; // Send next frame
+break;
+}
+}
 
-    // Enable interrupts for the next transmission chunk
-    TIMER2_INTERRUPT_ENABLE();
+// Enable interrupts for the next transmission chunk
+TIMER2_INTERRUPT_ENABLE();
 }
 
 void dmxWrite(int channel, uint8_t value) {
@@ -283,14 +293,3 @@ void DmxSimpleClass::write(int address, uint8_t value)
     dmxWrite(address, value);
 }
 DmxSimpleClass DmxSimple;
-* TIMER2 has a different register mapping on the ATmega8.
- * The modern chips (168, 328P, 1280) use identical mappings.
- */
-#if defined(__AVR_ATmega168__) || defined(__AVR_ATmega168P__) || defined(__AVR_ATmega328P__) || defined(__AVR_ATmega1280__) || defined(__AVR_ATmega2560__) || defined(__AVR_AT90USB646__) || defined(__AVR_AT90USB1286__)
-#define TIMER2_INTERRUPT_ENABLE() TIMSK2 |= _BV(TOIE2)
-#define TIMER2_INTERRUPT_DISABLE() TIMSK2 &= ~_BV(TOIE2)
-#define ISR_NAME TIMER2_OVF_vect
-#define BITS_PER_TIMER_TICK (F_CPU / 31372)
-
-// older ATMEGA8 has slighly different timer2
-#
